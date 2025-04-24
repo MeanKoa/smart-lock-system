@@ -1,0 +1,12 @@
+{
+  "devDependencies": {
+    "tailwindcss": "^3.4.13"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "express-session": "^1.18.1",
+    "mqtt": "^5.10.1",
+    "node": "^22.9.0",
+    "ws": "^8.18.0"
+  }
+}

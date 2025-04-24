@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Home Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #f5f5f5;
+        }
+        .device {
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .device.active {
+            background-color: #34C759;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+        .device .fa-power-off {
+            transition: color 0.3s ease;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col items-center p-4 bg-white">
+    <!-- Header -->
+    <div class="w-full max-w-md flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Home Assistant</h1>
+        <button id="settings-btn" class="text-gray-600 hover:text-gray-900">
+            <i class="fas fa-cog text-2xl"></i>
+        </button>
+    </div>
+
+    <!-- Device Grid -->
+    <div id="main-content" class="grid grid-cols-2 gap-6 w-full max-w-md">
+        <!-- Smart Door -->
+        <div class="device bg-white rounded-lg shadow p-4 flex flex-col justify-between transition transform hover:scale-105" data-device-id="door">
+            <div class="flex justify-between items-center">
+                <i class="fas fa-door-closed text-gray-600 text-xl"></i>
+                <button class="text-gray-600 hover:text-green-600 toggle-btn" data-device="door">
+                    <i class="fas fa-power-off"></i>
+                </button>
+            </div>
+            <div>
+                <p class="font-semibold text-gray-700">Smart Door</p>
+                <p class="text-sm text-gray-500">IUH Smart Lock</p>
+            </div>
+        </div>
+        <!-- Alarm Speaker -->
+        <div class="device bg-white rounded-lg shadow p-4 flex flex-col justify-between transition transform hover:scale-105" data-device-id="speaker">
+            <div class="flex justify-between items-center">
+                <i class="fas fa-volume-up text-gray-600 text-xl"></i>
+                <button class="text-gray-600 hover:text-red-600 toggle-btn" data-device="speaker">
+                    <i class="fas fa-power-off"></i>
+                </button>
+            </div>
+            <div>
+                <p class="font-semibold text-gray-700">Alarm Speaker</p>
+                <p class="text-sm text-gray-500">Smart Speaker</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Two-Factor Authentication -->
+    <div id="mode" class="flex items-center justify-between mt-8 w-full max-w-md">
+        <span class="text-gray-800 font-semibold">Authentication Mode</span>
+        <select id="auth-mode" class="border border-gray-300 rounded-md p-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="1">Single-Factor</option>
+            <option value="2" selected>Two-Factor</option>
+        </select>
+    </div>
+
+    <!-- Weekly Stats -->
+    <div id="chart" class="mt-8 w-full max-w-md">
+        <h2 class="text-xl font-bold text-gray-800 mb-4 text-center">Weekly Open Door</h2>
+        <div class="bg-white rounded-lg shadow p-4">
+            <canvas id="openDoorChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="change-password-content" class="bg-gray-300 bg-opacity-50 p-8 rounded-lg shadow-lg w-full max-w-md hidden">
+        <div class="flex justify-between items-center mb-4">
+            <button id="back-button-change" class="text-black text-2xl"><i class="fas fa-arrow-left"></i></button>
+        </div>
+        <h2 class="text-2xl font-semibold mb-4 text-black">Change Password</h2>
+        <p class="text-gray-500 mb-6">Password length is 4 characters number.</p>
+        <div class="mb-4">
+            <label for="old-password" class="block text-gray-500 mb-2">Old password</label>
+            <input id="old-password" type="password" class="w-full px-4 py-2 border rounded-lg bg-gray-500 text-black focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter old password">
+        </div>
+        <div class="mb-4 relative">
+            <label for="new-password" class="block text-gray-500 mb-2">New password</label>
+            <input id="new-password" type="password" class="w-full px-4 py-2 border rounded-lg bg-gray-500 text-black focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter new password">
+            <button class="absolute right-3 top-10 text-gray-500 hover:text-gray-700">
+                <i class="fas fa-eye"></i>
+            </button>
+        </div>
+        <div class="mb-4 relative">
+            <label for="confirm-password" class="block text-gray-500 mb-2">Confirm password</label>
+            <input id="confirm-password" type="password" class="w-full px-4 py-2 border rounded-lg bg-gray-500 text-black focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Confirm new password">
+            <button class="absolute right-3 top-10 text-gray-500 hover:text-gray-700">
+                <i class="fas fa-eye"></i>
+            </button>
+        </div>
+        <button id="submit-password" class="w-full border text-black py-2 rounded-lg bg-gray-800 bg-opacity-50 hover:bg-gray-700">Submit</button>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const ws = new WebSocket('ws://172.20.10.2:8080/?type=control');
+            const authModeSelect = document.getElementById('auth-mode');
+            let storedPassword = ""; // Lưu mật khẩu
+            let openDoorStats = JSON.parse(localStorage.getItem('openDoorStats')) || [0, 0, 0, 0, 0, 0, 0]; // Số lần mở cửa 7 ngày
+
+            // Initialize Chart.js
+            const ctx = document.getElementById('openDoorChart').getContext('2d');
+            const openDoorChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                    datasets: [{
+                        label: 'Open Door Count',
+                        data: openDoorStats,
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+
+            // Save stats to localStorage
+            const saveStats = () => {
+                localStorage.setItem('openDoorStats', JSON.stringify(openDoorStats));
+            };
+
+            // WebSocket Events
+            ws.onopen = () => {
+                console.log('WebSocket connected.');
+            };
+
+            ws.onmessage = (event) => {
+                const message = event.data;
+                console.log('Received:', message);
+
+                if (message.startsWith('Password: ')) {
+                    storedPassword = message.split(': ')[1].trim();
+                    console.log('Password updated:', storedPassword);
+                }
+
+                if (message === 'Mode: 1FA') {
+                    authModeSelect.value = '1';
+                } else if (message === '2FA') {
+                    authModeSelect.value = '2';
+                }
+
+                if (message === 'opendoor') {
+                    toggleDeviceState('door', true);
+                }
+
+                if (message === 'closedoor') {
+                    toggleDeviceState('door', false);
+                    handleOpenDoor();
+                }
+
+                if (message === 'stopspeaker') {
+                    toggleDeviceState('speaker', false);
+                }
+
+                // Nếu ESP32 gửi mở cửa
+                if (message === 'openspeaker') {
+                    toggleDeviceState('speaker', true);
+                }
+
+                // Có thể thêm các thông điệp khác từ ESP32 ở đây
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected.');
+                alert('WebSocket disconnected. Redirecting to login...');
+                window.location.href = '/login';
+            };
+
+            // Toggle Device State Function
+            const toggleDeviceState = (deviceId, isActive) => {
+                const device = document.querySelector(`.device[data-device-id="${deviceId}"]`);
+                if (isActive) {
+                    device.classList.add('active');
+                } else {
+                    device.classList.remove('active');
+                }
+            };
+
+            // Handle Open Door (both user and server initiated)
+            const handleOpenDoor = () => {
+                const dayIndex = (new Date().getDay() + 6) % 7; // Để thứ Hai là 0
+                openDoorStats[dayIndex]++;
+                openDoorChart.update();
+                saveStats();
+            };
+
+            // Device Button Event Listeners
+            document.querySelectorAll('.toggle-btn').forEach(button => {
+                button.addEventListener('click', () => {
+                    const deviceId = button.getAttribute('data-device');
+                    const device = document.querySelector(`.device[data-device-id="${deviceId}"]`);
+                    const isActive = device.classList.contains('active');
+
+                    // Gửi lệnh qua WebSocket
+                    if (deviceId === 'door') {
+                        ws.send(isActive ? 'closedoor' : 'opendoor');
+                        if (!isActive) {
+                            toggleDeviceState('door', true); // Cập nhật khi mở cửa từ người dùng
+                        } else {
+                            toggleDeviceState('door', false);
+                        }
+                    } else if (deviceId === 'speaker') {
+                        ws.send(isActive ? 'stopspeaker' : 'playspeaker');
+                        toggleDeviceState('speaker', !isActive);
+                    }
+                });
+            });
+
+            //Security Mode Toggle
+            authModeSelect.addEventListener('change', () => {
+                const mode = authModeSelect.value === '1' ? 'ChangeMode: 1FA' : 'ChangeMode: 2FA';
+                console.log(`Chế độ bảo mật: ${mode}`);
+                ws.send(mode); // Gửi trạng thái đến ESP32
+            });
+
+            // Change Password Modal Controls
+            const settingsBtn = document.getElementById('settings-btn');
+            const mainContent = document.getElementById('main-content');
+            const chartContent = document.getElementById('chart');
+            const modeContent = document.getElementById('mode');
+            const changePasswordContent = document.getElementById('change-password-content');
+            const backButtonChange = document.getElementById('back-button-change');
+            const submitPasswordBtn = document.getElementById('submit-password');
+
+            // Mở tab đổi mật khẩu khi bấm nút cài đặt
+            settingsBtn.addEventListener('click', () => {
+                mainContent.classList.add('hidden');
+                chartContent.classList.add('hidden');
+                modeContent.classList.add('hidden');
+                changePasswordContent.classList.remove('hidden');
+            });
+
+            // Quay lại tab chính
+            backButtonChange.addEventListener('click', () => {
+                changePasswordContent.classList.add('hidden');
+                mainContent.classList.remove('hidden');
+                chartContent.classList.remove('hidden');
+                modeContent.classList.remove('hidden');
+                // Reset các trường nhập
+                document.getElementById('old-password').value = '';
+                document.getElementById('new-password').value = '';
+                document.getElementById('confirm-password').value = '';
+            });
+
+            // Xử lý đổi mật khẩu
+            submitPasswordBtn.addEventListener('click', () => {
+                const oldPassword = document.getElementById('old-password').value;
+                const newPassword = document.getElementById('new-password').value;
+                const confirmPassword = document.getElementById('confirm-password').value;
+
+                // Kiểm tra mật khẩu cũ, mới và xác nhận
+                if (oldPassword === "") {
+                    alert("Vui lòng nhập mật khẩu cũ.");
+                    return;
+                }
+                if (oldPassword !== storedPassword) {
+                    alert("Mật khẩu cũ không chính xác.");
+                    return;
+                }
+                if (newPassword.length < 4) {
+                    alert("Mật khẩu mới phải có ít nhất 4 ký tự.");
+                    return;
+                }
+                if (newPassword !== confirmPassword) {
+                    alert("Mật khẩu mới và xác nhận mật khẩu không khớp.");
+                    return;
+                }
+
+                // Nếu tất cả các điều kiện đúng, đổi mật khẩu thành công
+                ws.send("ChangePassword: " + newPassword);
+                storedPassword = newPassword; // Cập nhật mật khẩu đã lưu
+                alert("Đã đổi mật khẩu thành công!");
+                // Quay lại tab chính
+                backButtonChange.click();
+            });
+
+            // Hiển thị/ẩn mật khẩu
+            document.querySelectorAll('.fa-eye').forEach(icon => {
+                icon.addEventListener('click', () => {
+                    const input = icon.parentElement.previousElementSibling;
+                    const isPasswordVisible = input.type === 'text';
+                    input.type = isPasswordVisible ? 'password' : 'text';
+                    icon.classList.toggle('fa-eye', isPasswordVisible);
+                    icon.classList.toggle('fa-eye-slash', !isPasswordVisible);
+                });
+            });
+        });
+    </script>
+</body>
+</html>
